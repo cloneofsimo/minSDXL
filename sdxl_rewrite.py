@@ -1,3 +1,9 @@
+# Obviously modified from the original source code
+# https://github.com/huggingface/diffusers
+# So has APACHE 2.0 license
+
+# Author : Simo Ryu
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -6,6 +12,7 @@ import math
 from collections import namedtuple
 
 # SDXL
+
 
 class Timesteps(nn.Module):
     def __init__(self, num_channels: int = 320):
@@ -37,11 +44,10 @@ class TimestepEmbedding(nn.Module):
         self.linear_2 = nn.Linear(out_features, out_features, bias=True)
 
     def forward(self, sample):
-        
         sample = self.linear_1(sample)
         sample = self.act(sample)
         sample = self.linear_2(sample)
-        
+
         return sample
 
 
@@ -100,7 +106,7 @@ class Attention(nn.Module):
         else:
             self.num_heads = num_heads
             self.head_dim = inner_dim // num_heads
-            
+
         self.scale = self.head_dim**-0.5
         if cross_attention_dim is None:
             cross_attention_dim = inner_dim
@@ -134,7 +140,7 @@ class Attention(nn.Module):
         attn_weights = torch.softmax(scores, dim=-1)
         attn_output = torch.matmul(attn_weights, v)
         attn_output = attn_output.transpose(1, 2).contiguous().view(b, t, c)
-     
+
         for layer in self.to_out:
             attn_output = layer(attn_output)
 
@@ -150,6 +156,7 @@ class GEGLU(nn.Module):
         x_proj = self.proj(x)
         x1, x2 = x_proj.chunk(2, dim=-1)
         return x1 * torch.nn.functional.gelu(x2)
+
 
 class FeedForward(nn.Module):
     def __init__(self, in_features, out_features):
@@ -180,7 +187,6 @@ class BasicTransformerBlock(nn.Module):
         self.ff = FeedForward(hidden_size, hidden_size)
 
     def forward(self, x, encoder_hidden_states=None):
-   
         residual = x
 
         x = self.norm1(x)
@@ -409,13 +415,20 @@ class UNetMidBlock2DCrossAttn(nn.Module):
 
         return hidden_states
 
+
 class UNet2DConditionModel(nn.Module):
     def __init__(self):
         super(UNet2DConditionModel, self).__init__()
 
-        self.config = namedtuple("config", "in_channels addition_time_embed_dim")
+        # This is needed to imitate huggingface config behavior
+        # has nothing to do with the model itself
+        # remove this if you don't use diffuser's pipeline
+        self.config = namedtuple(
+            "config", "in_channels addition_time_embed_dim sample_size"
+        )
         self.config.in_channels = 4
         self.config.addition_time_embed_dim = 256
+        self.config.sample_size = 128
 
         self.conv_in = nn.Conv2d(4, 320, kernel_size=3, stride=1, padding=1)
         self.time_proj = Timesteps()
@@ -491,17 +504,13 @@ class UNet2DConditionModel(nn.Module):
             )
 
             down_block_res_samples += res_samples
-
         # 4. mid
-        if self.mid_block is not None:
-            sample = self.mid_block(
-                sample, emb, encoder_hidden_states=encoder_hidden_states
-            )
+        sample = self.mid_block(
+            sample, emb, encoder_hidden_states=encoder_hidden_states
+        )
 
         # 5. up
         for i, upsample_block in enumerate(self.up_blocks):
-            is_final_block = i == len(self.up_blocks) - 1
-
             res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
             down_block_res_samples = down_block_res_samples[
                 : -len(upsample_block.resnets)
