@@ -490,25 +490,23 @@ class UNet2DConditionModel(nn.Module):
         sample = self.conv_in(sample)
 
         # 3. down
-        s0 = [sample]
-        sample, s1 = self.down_blocks[0](
+        s0 = sample
+        sample, [s1, s2, s3] = self.down_blocks[0](
             sample,
             temb=emb,
         )
 
-        sample, s2 = self.down_blocks[1](
-            sample,
-            temb=emb,
-            encoder_hidden_states=encoder_hidden_states,
-        )
-
-        sample, s3 = self.down_blocks[2](
+        sample, [s4, s5, s6] = self.down_blocks[1](
             sample,
             temb=emb,
             encoder_hidden_states=encoder_hidden_states,
         )
 
-        alls = s0 + s1 + s2 + s3
+        sample, [s7, s8] = self.down_blocks[2](
+            sample,
+            temb=emb,
+            encoder_hidden_states=encoder_hidden_states,
+        )
 
         # 4. mid
         sample = self.mid_block(
@@ -519,25 +517,24 @@ class UNet2DConditionModel(nn.Module):
         sample = self.up_blocks[0](
             hidden_states=sample,
             temb=emb,
-            res_hidden_states_tuple=alls[-3:],
+            res_hidden_states_tuple=[s6, s7, s8],
             encoder_hidden_states=encoder_hidden_states,
         )
 
         sample = self.up_blocks[1](
             hidden_states=sample,
             temb=emb,
-            res_hidden_states_tuple=alls[-6:-3],
+            res_hidden_states_tuple=[s3, s4, s5],
             encoder_hidden_states=encoder_hidden_states,
         )
 
         sample = self.up_blocks[2](
             hidden_states=sample,
             temb=emb,
-            res_hidden_states_tuple=alls[-9:-6],
+            res_hidden_states_tuple=[s0, s1, s2],
         )
 
         # 6. post-process
-
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
