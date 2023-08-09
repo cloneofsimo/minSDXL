@@ -321,7 +321,6 @@ class CrossAttnDownBlock2D(nn.Module):
             output_states.append(hidden_states)
 
         if self.downsamplers is not None:
-            
             hidden_states = self.downsamplers[0](hidden_states)
             output_states.append(hidden_states)
 
@@ -473,7 +472,7 @@ class UNet2DConditionModel(nn.Module):
         # Implement the forward pass through the model
         timesteps = timesteps.expand(sample.shape[0])
         t_emb = self.time_proj(timesteps).to(dtype=sample.dtype)
-    
+
         emb = self.time_embedding(t_emb)
 
         text_embeds = added_cond_kwargs.get("text_embeds")
@@ -508,7 +507,7 @@ class UNet2DConditionModel(nn.Module):
             temb=emb,
             encoder_hidden_states=encoder_hidden_states,
         )
-        
+
         alls = s0 + s1 + s2 + s3
 
         # 4. mid
