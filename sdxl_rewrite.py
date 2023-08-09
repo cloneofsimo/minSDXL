@@ -278,13 +278,13 @@ class DownBlock2D(nn.Module):
         self.downsamplers = nn.ModuleList([Downsample2D(out_channels, out_channels)])
 
     def forward(self, hidden_states, temb):
-        output_states = ()
+        output_states = []
         for module in self.resnets:
             hidden_states = module(hidden_states, temb)
-            output_states += (hidden_states,)
+            output_states.append(hidden_states)
 
         hidden_states = self.downsamplers[0](hidden_states)
-        output_states += (hidden_states,)
+        output_states.append(hidden_states)
 
         return hidden_states, output_states
 
@@ -311,21 +311,19 @@ class CrossAttnDownBlock2D(nn.Module):
             )
 
     def forward(self, hidden_states, temb, encoder_hidden_states):
-        output_states = ()
+        output_states = []
         for resnet, attn in zip(self.resnets, self.attentions):
             hidden_states = resnet(hidden_states, temb)
             hidden_states = attn(
                 hidden_states,
                 encoder_hidden_states=encoder_hidden_states,
             )
-
-            output_states = output_states + (hidden_states,)
+            output_states.append(hidden_states)
 
         if self.downsamplers is not None:
-            for downsampler in self.downsamplers:
-                hidden_states = downsampler(hidden_states)
-
-            output_states = output_states + (hidden_states,)
+            
+            hidden_states = self.downsamplers[0](hidden_states)
+            output_states.append(hidden_states)
 
         return hidden_states, output_states
 
@@ -475,7 +473,7 @@ class UNet2DConditionModel(nn.Module):
         # Implement the forward pass through the model
         timesteps = timesteps.expand(sample.shape[0])
         t_emb = self.time_proj(timesteps).to(dtype=sample.dtype)
-        # print(t_emb)
+    
         emb = self.time_embedding(t_emb)
 
         text_embeds = added_cond_kwargs.get("text_embeds")
@@ -493,40 +491,56 @@ class UNet2DConditionModel(nn.Module):
         sample = self.conv_in(sample)
 
         # 3. down
-        down_block_res_samples = (sample,)
-        for downsample_block in self.down_blocks:
-            isattn = hasattr(downsample_block, "attentions")
+        s0 = [sample]
+        sample, s1 = self.down_blocks[0](
+            sample,
+            temb=emb,
+        )
 
-            sample, res_samples = downsample_block(
-                sample,
-                temb=emb,
-                **({"encoder_hidden_states": encoder_hidden_states} if isattn else {}),
-            )
+        sample, s2 = self.down_blocks[1](
+            sample,
+            temb=emb,
+            encoder_hidden_states=encoder_hidden_states,
+        )
 
-            down_block_res_samples += res_samples
+        sample, s3 = self.down_blocks[2](
+            sample,
+            temb=emb,
+            encoder_hidden_states=encoder_hidden_states,
+        )
+        
+        alls = s0 + s1 + s2 + s3
+
         # 4. mid
         sample = self.mid_block(
             sample, emb, encoder_hidden_states=encoder_hidden_states
         )
 
         # 5. up
-        for i, upsample_block in enumerate(self.up_blocks):
-            res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
-            down_block_res_samples = down_block_res_samples[
-                : -len(upsample_block.resnets)
-            ]
-            isattn = hasattr(upsample_block, "attentions")
-            sample = upsample_block(
-                hidden_states=sample,
-                temb=emb,
-                res_hidden_states_tuple=res_samples,
-                **({"encoder_hidden_states": encoder_hidden_states} if isattn else {}),
-            )
+        sample = self.up_blocks[0](
+            hidden_states=sample,
+            temb=emb,
+            res_hidden_states_tuple=alls[-3:],
+            encoder_hidden_states=encoder_hidden_states,
+        )
+
+        sample = self.up_blocks[1](
+            hidden_states=sample,
+            temb=emb,
+            res_hidden_states_tuple=alls[-6:-3],
+            encoder_hidden_states=encoder_hidden_states,
+        )
+
+        sample = self.up_blocks[2](
+            hidden_states=sample,
+            temb=emb,
+            res_hidden_states_tuple=alls[-9:-6],
+        )
 
         # 6. post-process
-        if self.conv_norm_out:
-            sample = self.conv_norm_out(sample)
-            sample = self.conv_act(sample)
+
+        sample = self.conv_norm_out(sample)
+        sample = self.conv_act(sample)
         sample = self.conv_out(sample)
 
         return [sample]
